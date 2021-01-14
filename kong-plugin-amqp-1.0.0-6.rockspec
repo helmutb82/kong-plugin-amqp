@@ -1,25 +1,25 @@
-package = "kong-plugin-amqp"
+package = "kong-plugin-amqp-rpc"
 version = "1.0.0-6"
 
-local pluginName = "amqp"
+local pluginName = "amqp-rpc"
 
 supported_platforms = {"linux", "macosx"}
 source = {
-  url = "git://github.com/gsdenys/kong-plugin-amqp.git",
-  tag = "1.0.0-RC1"
+  url = "git://github.com/helmutb82/kong-plugin-amqp.git",
+  branch = "master"
 }
 
 description = {
   summary = "Kong Plungin to act as an AMQP 0.9.1 client",
   detailed = [[
-    Kong plugin to publish and receive message from AMQP server. Is strongly advisable to use RabbitMQ as AMQP provider once the amqp-client library was build and test over it
+    Fork of gsdenys/kong-plugin-amqp Kong plugin to publish and receive message from AMQP server. Is strongly advisable to use RabbitMQ as AMQP provider once the amqp-client library was build and test over it
   ]],
-  homepage = "https://github.com/gsdenys/kong-plugin-amqp",
+  homepage = "https://github.com/helmutb82/kong-plugin-amqp",
   license = "Apache 2.0"
 }
 
 dependencies = {
-  "lua ~> 5.1", "amqp-client ~> 1.3.0", "lua-cjson ~> 2.1.0", "lua-resty-uuid ~> 1.1"
+  "lua ~> 5.1", "amqp-client-rpc ~> 1.3.0", "lua-cjson ~> 2.1.0", "lua-resty-uuid ~> 1.1"
 }
 
 build = {
