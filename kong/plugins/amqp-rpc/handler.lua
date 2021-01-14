@@ -1,10 +1,10 @@
 -- Grab pluginname from module name
 -- local plugin_name = ({...})[1]:match("^kong%.plugins%.([^%.]+)")
-local plugin_name = "amqp"
+local plugin_name = "amqp-rpc"
 
 -- load the base plugin object and create a subclass
 local plugin = require("kong.plugins.base_plugin"):extend()
-local amqp = require "amqp"
+local amqp = require "amqprpc"
 local cjson = require("cjson")
 local uuid = require("resty.uuid")
 
@@ -12,7 +12,7 @@ local constants = require("kong.constants")
 
 local function has_amqp_module()
     for _, v in pairs(constants.PROTOCOLS) do
-        if v == "amqp" then
+        if v == "amqpr-pc" then
             ngx.log(ngx.DEBUG, "Kong already contains AMQP protocol!")
             return true
         end
