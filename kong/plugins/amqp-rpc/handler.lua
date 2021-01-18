@@ -7,6 +7,9 @@ local plugin = require("kong.plugins.base_plugin"):extend()
 local amqp = require "amqprpc"
 local cjson = require("cjson")
 local uuid = require("resty.uuid")
+local inspect = require("inspect")
+local rpc_response
+  
 
 local constants = require("kong.constants")
 
@@ -46,7 +49,7 @@ local function amqp_get_context(conf)
         kong.log.debug("using AMQP_PASSWORD var")
     end
 
-    local ctx = amqp:new({
+    local opts = {
         role = 'producer',
         exchange = conf.exchange,
         routing_key = conf.routingkey,
@@ -56,9 +59,21 @@ local function amqp_get_context(conf)
         no_ack = false,
         durable = true,
         auto_delete = true,
+        consumer_tag = '',
         exclusive = false,
         properties = {}
-    })
+    }
+
+    if (conf.rpc == true) then    -- IF RPC
+        opts.role = 'consumer'
+        opts.queue = 'amq.rabbitmq.reply-to'
+        opts.no_ack = true
+    end   
+    
+
+
+    local ctx = amqp:new(opts)
+
 
     ngx.log(ngx.DEBUG, "AMQP context created successfully")
 
@@ -66,17 +81,53 @@ local function amqp_get_context(conf)
 end
 
 local function amqp_connect(ctx)
+   
     ctx:connect(kong.router.get_service().host, kong.router.get_service().port)
     ctx:setup()
 
-    ngx.log(ngx.DEBUG, "AMQP connected successfully at: ", "amqp://",
-            kong.router.get_service().host, ":", kong.router.get_service().port)
+    ngx.log(
+        ngx.DEBUG, 
+        "AMQP connected successfully at: ",
+        "amqp://",
+        kong.router.get_service().host, ":", kong.router.get_service().port
+    )
 
     return ctx
 end
 
-local function amqp_publish(ctx, message, uid)
-    local ok, err = ctx:publish(message, {}, {correlation_id = uid})
+local function amqp_publish(ctx, message, uid, conf)
+    
+    local ok, err, properties
+
+    if (conf.rpc == false) then    -- IF FF
+        properties = {correlation_id = uid}
+    else   
+        --- RPC
+        --
+        -- Prepare to consume
+        --
+      
+        ok, err = ctx:prepare_to_consume() -- this has to be right after setup()
+      
+        if not ok then
+          kong.log('could not prepare to consume: '..err)
+        end
+
+        properties = { 
+            reply_to = 'amq.rabbitmq.reply-to',
+            content_type = 'application/json',
+            content_encoding = 'utf-8',
+            correlation_id = uid,
+            delivery_mode = 2,
+            headers = { 
+                ['api-version'] = 1,
+                correlation_id = uid 
+            }
+        }
+
+    end
+    
+    ok, err = ctx:publish(cjson.encode(message), ctx.opts, properties)
 
     if err then
         ngx.log(ngx.ERR, "Internal server errror: ", err)
@@ -89,8 +140,48 @@ local function amqp_publish(ctx, message, uid)
     ngx.log(ngx.DEBUG, "Raw Body Published successfully")
 end
 
-local function get_response(id)
-    local resp = cjson.encode({uuid = id, time = ngx.localtime()})
+local function amqp_get_message(conf)
+    
+    local message = {}
+
+    if conf.forward_method == true then
+        message.method = kong.request.get_method()
+    end
+
+    if conf.forward_path == true then
+        message.path = kong.request.get_path()
+    end
+
+    if conf.forward_headers == true then
+        message.headers = kong.request.get_headers()
+    end
+
+    if conf.forward_query == true then
+        message.query = kong.request.get_query()
+    end
+
+    if conf.forward_body == true then
+        message.body = kong.request.get_body()
+    end
+
+    return message
+end
+
+
+
+local function get_response(id, ctx, conf)
+    
+    local ltime = ngx.localtime()
+    local resp
+    
+    if (conf.rpc == false) then    -- IF FF
+        resp = cjson.encode({uuid = id, ltime})
+    else    
+        -- RPC 
+        ctx.opts.consume_noloop = true
+        rpc_response = ctx:consume_loop()
+        resp = cjson.encode({uuid = id, ltime, data = rpc_response})
+    end
 
     ngx.log(ngx.DEBUG, "AMQP Response body generated with ID: ", id)
 
@@ -99,14 +190,13 @@ end
 
 function plugin:access(conf)
     plugin.super.access(self)
-
     local ctx = amqp_get_context(conf)
     amqp_connect(ctx)
 
     local uid = uuid.generate()
-    amqp_publish(ctx, kong.request.get_raw_body(), uid)
+    amqp_publish(ctx, amqp_get_message(conf), uid, conf)
 
-    local response = get_response(uid)
+    local response = get_response(uid, ctx, conf)
     ngx.say(response)
 
     ctx:teardown()
@@ -127,3 +217,4 @@ plugin.PRIORITY = 1000
 
 -- return our plugin object
 return plugin
+
