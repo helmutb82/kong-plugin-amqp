@@ -173,32 +173,44 @@ local function get_response(id, ctx, conf)
     
     local ltime = ngx.localtime()
     local resp
+    local err = nil
     
     if (conf.rpc == false) then    -- IF FF
         resp = cjson.encode({uuid = id, ltime})
     else    
         -- RPC 
         ctx.opts.consume_noloop = true
+        ctx.opts.heartbeat = 30
+        ctx.opts.heartbeat_max_iterations = 1
         rpc_response = ctx:consume_loop()
-        resp = cjson.encode({uuid = id, ltime, data = rpc_response})
+        resp, err = cjson.encode({uuid = id, ltime, data = rpc_response})
     end
 
     ngx.log(ngx.DEBUG, "AMQP Response body generated with ID: ", id)
 
-    return resp
+    return resp, err
 end
 
 function plugin:access(conf)
     plugin.super.access(self)
     local ctx = amqp_get_context(conf)
+    local response, err
     amqp_connect(ctx)
 
     local uid = uuid.generate()
     amqp_publish(ctx, amqp_get_message(conf), uid, conf)
 
-    local response = get_response(uid, ctx, conf)
-    ngx.say(response)
+    local response, err = get_response(uid, ctx, conf)
+    
+    if err then
+        ngx.log(ngx.ERR, "Internal server errror: ", err)
+        ngx.say(cjson.encode({error = "Internal Server Error"}))
 
+        ngx.ctx.status = ngx.HTTP_INTERNAL_SERVER_ERROR
+        ngx.exit(ngx.ctx.status)
+    end
+    
+    ngx.say(response)
     ctx:teardown()
     ctx:close()
 
